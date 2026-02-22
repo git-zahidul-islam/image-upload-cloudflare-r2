@@ -1,0 +1,40 @@
+{
+  "info": {
+    "_postman_id": "8096e4cd-0c7b-4fa2-a65b-aaecf7ac3311",
+    "name": "Image-upload-s3-cloudflare",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "42338612"
+  },
+  "item": [
+    {
+      "name": "upload",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "image",
+              "type": "file",
+              "uuid": "7d6c2a11-4bf9-4f22-8dcb-cb03054cbd0e",
+              "src": "/C:/Users/admin/Downloads/sportsitz.png"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:3000/upload",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3000",
+          "path": [
+            "upload"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
