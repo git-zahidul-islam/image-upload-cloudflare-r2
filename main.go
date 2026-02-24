@@ -24,9 +24,15 @@ type ApiResponse struct {
 	Message string  `json:"message"`
 }
 
+type HealthResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
 var s3Client *s3.Client
 var bucketName string
 var publicURL string
+var apiKey string
 
 func main() {
 	_ = godotenv.Load()
@@ -38,7 +44,13 @@ func main() {
 
 	initR2()
 
-	http.HandleFunc("/upload", uploadHandler)
+	apiKey = os.Getenv("API_KEY")
+	if apiKey == "" {
+		log.Fatal("Missing required environment variable: API_KEY")
+	}
+
+	http.HandleFunc("/", authMiddleware(healthHandler))
+	http.HandleFunc("/upload", authMiddleware(uploadHandler))
 
 	certFile := os.Getenv("TLS_CERT_FILE")
 	keyFile := os.Getenv("TLS_KEY_FILE")
@@ -50,6 +62,30 @@ func main() {
 		log.Println("🚀 Server running on port", port, "(HTTP)")
 		log.Fatal(http.ListenAndServe(":"+port, nil))
 	}
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-API-Key")
+		if key != apiKey {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  401,
+				"message": "Unauthorized: Invalid or missing API key",
+			})
+			return
+		}
+		next(w, r)
+	}
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(HealthResponse{
+		Success: true,
+		Message: "successfully connect",
+	})
 }
 
 func initR2() {

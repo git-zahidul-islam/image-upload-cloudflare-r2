@@ -1,137 +1,55 @@
-# Deploy to Render - Image Upload Service
+# Deploy to Render
 
-Complete guide to deploy the Image Upload Service on Render.com with automatic deployments from GitHub.
+## Quick Deploy (Web Dashboard)
 
-## Table of Contents
-- [Quick Deploy (Web Service)](#quick-deploy-web-service)
-- [Docker Deployment](#docker-deployment)
-- [Environment Variables Setup](#environment-variables-setup)
-- [Custom Domain](#custom-domain)
-- [Troubleshooting](#troubleshooting)
+### 1. Prepare Repository
+Push your code to GitHub/GitLab
 
----
-
-## Quick Deploy (Web Service)
-
-### Prerequisites
-- GitHub account with your repository
-- Render account (free tier available)
-- Cloudflare R2 credentials
-
-### Step 1: Push to GitHub
-
-```bash
-git add .
-git commit -m "Ready for Render deployment"
-git push origin main
-```
-
-### Step 2: Create Render Web Service
-
+### 2. Create Web Service
 1. Go to [Render Dashboard](https://dashboard.render.com/)
-2. Click **"New +"** → **"Web Service"**
-3. Connect your GitHub repository
-4. Select `image-upload-r2` repository
+2. Click **New +** → **Web Service**
+3. Connect your repository
+4. Configure:
+   - **Name**: `image-upload-r2`
+   - **Environment**: `Go`
+   - **Build Command**: `go build -o image-upload`
+   - **Start Command**: `./image-upload`
+   - **Instance Type**: Free or Starter ($7/month)
 
-### Step 3: Configure Service
+### 3. Add Environment Variables
+Click **Environment** → Add:
+```
+PORT=8080
+API_KEY=your-secret-api-key-here
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY=your-access-key
+R2_SECRET_KEY=your-secret-key
+R2_BUCKET_NAME=your-bucket-name
+R2_PUBLIC_URL=https://your-cdn-url.com
+```
 
-**Basic Settings:**
-- **Name:** `image-upload-service`
-- **Region:** Choose closest to your users
-- **Branch:** `main`
-- **Root Directory:** Leave empty
-- **Runtime:** `Go`
-- **Build Command:** `go build -o app main.go`
-- **Start Command:** `./app`
-
-**Instance Type:**
-- Free tier: `Free` (512 MB RAM, sleeps after inactivity)
-- Production: `Starter` ($7/month, always on)
-
-### Step 4: Add Environment Variables
-
-Click **"Advanced"** → **"Add Environment Variable"**
-
-Add these variables:
-
-| Key | Value |
-|-----|-------|
-| `PORT` | `10000` (Render default) |
-| `R2_ACCOUNT_ID` | Your Cloudflare account ID |
-| `R2_ACCESS_KEY` | Your R2 access key |
-| `R2_SECRET_KEY` | Your R2 secret key |
-| `R2_BUCKET_NAME` | Your bucket name |
-| `R2_PUBLIC_URL` | Your R2 public URL |
-
-### Step 5: Deploy
-
-1. Click **"Create Web Service"**
-2. Render will automatically:
-   - Clone your repository
-   - Install Go dependencies
-   - Build your application
-   - Deploy and start the service
-
-### Step 6: Get Your URL
-
-After deployment completes:
-- Your service URL: `https://image-upload-service.onrender.com`
-- Test endpoint: `https://image-upload-service.onrender.com/upload`
+### 4. Deploy
+Click **Create Web Service** → Render will auto-deploy
 
 ---
 
-## Docker Deployment
+## Deploy with render.yaml (Infrastructure as Code)
 
-### Step 1: Create Dockerfile
-
-Create `Dockerfile` in your project root:
-
-```dockerfile
-FROM golang:1.25-alpine AS builder
-
-WORKDIR /app
-
-# Copy dependency files
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source code
-COPY . .
-
-# Build application
-RUN go build -o image-upload main.go
-
-# Final stage
-FROM alpine:latest
-
-RUN apk --no-cache add ca-certificates
-
-WORKDIR /root/
-
-COPY --from=builder /app/image-upload .
-
-EXPOSE 10000
-
-CMD ["./image-upload"]
-```
-
-### Step 2: Create render.yaml
-
-Create `render.yaml` for infrastructure as code:
-
+### 1. Create render.yaml
 ```yaml
 services:
   - type: web
-    name: image-upload-service
-    runtime: docker
-    repo: https://github.com/yourusername/image-upload-r2
-    region: oregon
-    plan: free
-    branch: main
-    dockerfilePath: ./Dockerfile
+    name: image-upload-r2
+    env: go
+    buildCommand: go build -o image-upload
+    startCommand: ./image-upload
+    plan: free  # or starter
+    healthCheckPath: /
     envVars:
       - key: PORT
-        value: 10000
+        value: 8080
+      - key: API_KEY
+        sync: false
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY
@@ -144,271 +62,232 @@ services:
         sync: false
 ```
 
-### Step 3: Deploy from Dashboard
-
-1. Go to Render Dashboard
-2. Click **"New +"** → **"Web Service"**
-3. Connect repository
-4. Render will detect `Dockerfile` automatically
-5. Add environment variables
-6. Click **"Create Web Service"**
-
----
-
-## Environment Variables Setup
-
-### Using Render Dashboard
-
-1. Go to your service → **"Environment"**
-2. Click **"Add Environment Variable"**
-3. Add each variable individually
-
-### Using render.yaml (Recommended)
-
-```yaml
-envVars:
-  - key: PORT
-    value: 10000
-  - key: R2_ACCOUNT_ID
-    value: your_account_id
-  - key: R2_ACCESS_KEY
-    value: your_access_key
-  - key: R2_SECRET_KEY
-    value: your_secret_key
-  - key: R2_BUCKET_NAME
-    value: your_bucket_name
-  - key: R2_PUBLIC_URL
-    value: https://your-cdn-url.com
-```
-
-### Using Render CLI
-
+### 2. Push to Repository
 ```bash
-# Install Render CLI
-npm install -g @render/cli
+git add render.yaml
+git commit -m "Add Render config"
+git push
+```
 
-# Login
+### 3. Create Blueprint
+1. Go to Render Dashboard
+2. Click **New +** → **Blueprint**
+3. Connect repository
+4. Render will detect `render.yaml` and create service
+
+### 4. Set Environment Variables
+Go to service → **Environment** → Add all required variables
+
+---
+
+## Deploy with Render CLI
+
+### 1. Install Render CLI
+```bash
+# macOS
+brew install render
+
+# Linux/Windows
+curl -fsSL https://render.com/install.sh | bash
+```
+
+### 2. Login
+```bash
 render login
+```
 
-# Set environment variables
-render env set R2_ACCOUNT_ID=your_account_id
-render env set R2_ACCESS_KEY=your_access_key
-render env set R2_SECRET_KEY=your_secret_key
-render env set R2_BUCKET_NAME=your_bucket_name
-render env set R2_PUBLIC_URL=https://your-cdn-url.com
+### 3. Create Service
+```bash
+render services create
+```
+
+### 4. Set Environment Variables
+```bash
+render env set API_KEY=your-key
+render env set R2_ACCOUNT_ID=your-id
+render env set R2_ACCESS_KEY=your-access
+render env set R2_SECRET_KEY=your-secret
+render env set R2_BUCKET_NAME=your-bucket
+render env set R2_PUBLIC_URL=https://your-cdn.com
+```
+
+### 5. Deploy
+```bash
+render deploy
 ```
 
 ---
 
-## Custom Domain
+## Custom Domain Setup
 
-### Step 1: Add Custom Domain
+### 1. Add Custom Domain
+1. Go to service → **Settings** → **Custom Domains**
+2. Click **Add Custom Domain**
+3. Enter your domain: `api.yourdomain.com`
 
-1. Go to your service → **"Settings"**
-2. Scroll to **"Custom Domain"**
-3. Click **"Add Custom Domain"**
-4. Enter your domain: `api.yourdomain.com`
-
-### Step 2: Configure DNS
-
+### 2. Configure DNS
 Add CNAME record in your DNS provider:
+```
+Type: CNAME
+Name: api
+Value: your-app.onrender.com
+```
 
-| Type | Name | Value |
-|------|------|-------|
-| CNAME | api | your-service.onrender.com |
-
-### Step 3: Enable HTTPS
-
-Render automatically provisions SSL certificates via Let's Encrypt.
-Wait 5-10 minutes for certificate issuance.
+### 3. SSL Certificate
+Render automatically provisions SSL certificate (Let's Encrypt)
 
 ---
 
-## Auto-Deploy from GitHub
+## Environment-Specific Deployments
 
-### Enable Auto-Deploy
-
-1. Go to service → **"Settings"**
-2. Under **"Build & Deploy"**
-3. Enable **"Auto-Deploy"** (enabled by default)
-
-Now every push to `main` branch triggers automatic deployment.
-
-### Deploy Specific Branch
-
+### Production
 ```yaml
-# In render.yaml
 services:
   - type: web
-    name: image-upload-service
-    branch: production  # Deploy from production branch
+    name: image-upload-prod
+    env: go
+    buildCommand: go build -o image-upload
+    startCommand: ./image-upload
+    plan: starter
+    envVars:
+      - key: API_KEY
+        sync: false
 ```
 
-### Manual Deploy
+### Staging
+```yaml
+services:
+  - type: web
+    name: image-upload-staging
+    env: go
+    buildCommand: go build -o image-upload
+    startCommand: ./image-upload
+    plan: free
+    envVars:
+      - key: API_KEY
+        sync: false
+```
 
-1. Go to service → **"Manual Deploy"**
-2. Click **"Deploy latest commit"**
-3. Or select specific commit from dropdown
+---
+
+## Auto-Deploy on Git Push
+
+### 1. Enable Auto-Deploy
+1. Go to service → **Settings**
+2. Enable **Auto-Deploy**
+3. Select branch: `main` or `production`
+
+### 2. Deploy on Push
+```bash
+git add .
+git commit -m "Update code"
+git push origin main
+```
+Render automatically deploys changes
 
 ---
 
 ## Health Checks
 
-### Add Health Check Endpoint
-
-Update `main.go`:
-
-```go
-func main() {
-    // ... existing code ...
-    
-    http.HandleFunc("/upload", uploadHandler)
-    http.HandleFunc("/health", healthHandler)  // Add this
-    
-    // ... rest of code ...
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte("OK"))
-}
+Render automatically monitors your service using the health check endpoint:
+```yaml
+healthCheckPath: /
 ```
 
-### Configure in Render
-
-1. Go to service → **"Settings"**
-2. Under **"Health Check"**
-3. Set **Health Check Path:** `/health`
+Your app must respond with 200 status code at `GET /` with valid API key.
 
 ---
 
 ## Monitoring & Logs
 
 ### View Logs
-
-**From Dashboard:**
-1. Go to your service
-2. Click **"Logs"** tab
-3. View real-time logs
-
-**From CLI:**
 ```bash
-render logs -f
+render logs
 ```
 
-### Metrics
+Or in dashboard: Service → **Logs**
 
-Render provides:
+### Metrics
+Dashboard shows:
 - CPU usage
 - Memory usage
 - Request count
 - Response times
 
-Access via **"Metrics"** tab in dashboard.
-
 ---
 
 ## Scaling
 
-### Vertical Scaling (Upgrade Plan)
-
-| Plan | RAM | CPU | Price |
-|------|-----|-----|-------|
-| Free | 512 MB | 0.1 CPU | $0 |
-| Starter | 512 MB | 0.5 CPU | $7/month |
-| Standard | 2 GB | 1 CPU | $25/month |
-| Pro | 4 GB | 2 CPU | $85/month |
+### Vertical Scaling
+1. Go to service → **Settings**
+2. Change **Instance Type**:
+   - Free: 512MB RAM, 0.1 CPU
+   - Starter: 512MB RAM, 0.5 CPU ($7/month)
+   - Standard: 2GB RAM, 1 CPU ($25/month)
 
 ### Horizontal Scaling
-
-Render doesn't support horizontal scaling on free/starter plans.
-Use Standard+ plans for multiple instances.
+Upgrade to paid plan for multiple instances
 
 ---
 
 ## Troubleshooting
 
-### Service Won't Start
-
-**Check logs:**
-```bash
-render logs
-```
-
-**Common issues:**
-- Missing environment variables
-- Wrong PORT (must be 10000 on Render)
-- Build command incorrect
-
 ### Build Fails
-
-**Check build command:**
-```bash
-go build -o app main.go
+Check Go version in `go.mod`:
+```go
+go 1.25
 ```
 
-**Verify go.mod:**
+### Service Won't Start
+Check logs:
 ```bash
-go mod tidy
-git add go.mod go.sum
-git commit -m "Update dependencies"
-git push
+render logs --tail
 ```
 
-### Service Sleeps (Free Tier)
+Verify environment variables are set
 
-Free tier services sleep after 15 minutes of inactivity.
+### 502 Bad Gateway
+- Ensure app listens on `0.0.0.0:$PORT`
+- Check health check endpoint returns 200
 
-**Solutions:**
-1. Upgrade to Starter plan ($7/month)
-2. Use external ping service (UptimeRobot, Pingdom)
-3. Accept cold starts (first request takes 30-60 seconds)
-
-### Upload Fails
-
-**Check environment variables:**
-1. Go to service → **"Environment"**
-2. Verify all R2 credentials are set
-3. Click **"Save Changes"** if modified
-
-**Test locally:**
+### API Key Issues
+Test locally:
 ```bash
-curl -X POST https://your-service.onrender.com/upload \
+curl -H "X-API-Key: your-key" https://your-app.onrender.com/
+```
+
+---
+
+## Pricing
+
+| Plan | Price | RAM | CPU | Features |
+|------|-------|-----|-----|----------|
+| Free | $0 | 512MB | 0.1 | Sleeps after 15min inactivity |
+| Starter | $7/mo | 512MB | 0.5 | Always on |
+| Standard | $25/mo | 2GB | 1.0 | Always on, more resources |
+
+---
+
+## Testing Deployment
+
+```bash
+# Get your Render URL
+RENDER_URL="https://your-app.onrender.com"
+
+# Health check
+curl -H "X-API-Key: your-key" $RENDER_URL/
+
+# Upload test
+curl -X POST $RENDER_URL/upload \
+  -H "X-API-Key: your-key" \
   -F "image=@test.jpg"
 ```
 
-### Port Issues
-
-Render requires port `10000`. Update `.env`:
-```env
-PORT=10000
-```
-
-Or set in Render dashboard.
-
 ---
 
-## Cost Optimization
-
-### Free Tier Limits
-- 750 hours/month (enough for 1 service)
-- Sleeps after 15 min inactivity
-- 100 GB bandwidth/month
-
-### Tips
-1. Use free tier for development/testing
-2. Upgrade to Starter for production ($7/month)
-3. Use Cloudflare R2 (cheaper than S3)
-4. Enable caching with Cloudflare CDN
-
----
-
-## CI/CD Pipeline
-
-### GitHub Actions Integration
+## CI/CD with GitHub Actions
 
 Create `.github/workflows/deploy.yml`:
-
 ```yaml
 name: Deploy to Render
 
@@ -422,114 +301,30 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.25'
-      
-      - name: Run tests
-        run: go test ./...
-      
       - name: Trigger Render Deploy
         run: |
-          curl -X POST https://api.render.com/deploy/srv-xxxxx?key=your-deploy-key
+          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
 ```
 
-Get deploy hook:
-1. Service → **"Settings"** → **"Deploy Hook"**
-2. Copy URL and add to GitHub Actions
+Add deploy hook in Render: Settings → Deploy Hook
 
 ---
 
-## Backup & Rollback
+## Best Practices
 
-### Rollback to Previous Version
-
-1. Go to service → **"Events"**
-2. Find successful deployment
-3. Click **"Rollback"**
-
-### Manual Rollback via Git
-
-```bash
-git revert HEAD
-git push origin main
-```
-
-Render will auto-deploy the reverted version.
-
----
-
-## Security Best Practices
-
-1. **Use Environment Variables** - Never commit credentials
-2. **Enable HTTPS** - Automatic with custom domains
-3. **Rotate Keys** - Change R2 credentials periodically
-4. **Monitor Logs** - Check for suspicious activity
-5. **Rate Limiting** - Add middleware for production
-
----
-
-## Comparison: Render vs Others
-
-| Feature | Render | Heroku | AWS | Vercel |
-|---------|--------|--------|-----|--------|
-| Free Tier | ✅ 750h | ❌ Paid only | ✅ Limited | ❌ No Go support |
-| Auto-deploy | ✅ | ✅ | ❌ Manual | ✅ |
-| Custom Domain | ✅ Free SSL | ✅ Paid SSL | ✅ Manual | ✅ |
-| Docker Support | ✅ | ✅ | ✅ | ❌ |
-| Pricing | $7/month | $7/month | $15+/month | N/A |
+- Use **Starter plan** for production (always on)
+- Enable **Auto-Deploy** for main branch
+- Use **Environment Groups** for shared variables
+- Set up **Custom Domain** with SSL
+- Monitor logs regularly
+- Use **Secrets** for sensitive data
+- Enable **Health Checks**
+- Set appropriate **Instance Type** based on traffic
 
 ---
 
 ## Support
 
-**Render Documentation:**
-- https://render.com/docs
-
-**Community:**
-- https://community.render.com
-
-**Status Page:**
-- https://status.render.com
-
-**Application Issues:**
-- GitHub: https://github.com/yourusername/image-upload-r2/issues
-
----
-
-## Quick Reference
-
-**Deploy Command:**
-```bash
-git push origin main
-```
-
-**View Logs:**
-```bash
-render logs -f
-```
-
-**Test Endpoint:**
-```bash
-curl -X POST https://your-service.onrender.com/upload \
-  -F "image=@test.jpg"
-```
-
-**Service URL Format:**
-```
-https://[service-name].onrender.com
-```
-
----
-
-## Next Steps
-
-1. ✅ Deploy to Render
-2. ✅ Add custom domain
-3. ✅ Set up monitoring
-4. ✅ Configure auto-deploy
-5. ✅ Test upload functionality
-6. ✅ Upgrade to paid plan for production
-
-Happy deploying! 🚀
+- [Render Documentation](https://render.com/docs)
+- [Render Community](https://community.render.com/)
+- [Status Page](https://status.render.com/)

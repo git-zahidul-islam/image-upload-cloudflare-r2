@@ -5,6 +5,8 @@ A lightweight, production-ready Go service for uploading images to Cloudflare R2
 ## Features
 
 - ✅ Upload images to Cloudflare R2 (S3-compatible)
+- ✅ API Key authentication for secure access
+- ✅ Health check endpoint
 - ✅ File type validation (JPEG, PNG, WebP)
 - ✅ Automatic UUID-based unique filenames
 - ✅ 10MB file size limit
@@ -44,6 +46,9 @@ Edit `.env` with your credentials:
 ```env
 PORT=8080
 
+# API Key for authentication (required)
+API_KEY=your-secret-api-key-here
+
 # Optional: For direct HTTPS support
 # TLS_CERT_FILE=/path/to/cert.pem
 # TLS_KEY_FILE=/path/to/key.pem
@@ -69,9 +74,37 @@ go build -o image-upload
 ./image-upload
 ```
 
-### API Endpoint
+### API Endpoints
+
+#### Health Check
+
+**GET** `/`
+
+**Headers:**
+- `X-API-Key`: Your API key (required)
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "successfully connect"
+}
+```
+
+**Error Response (401):**
+```json
+{
+  "status": 401,
+  "message": "Unauthorized: Invalid or missing API key"
+}
+```
+
+#### Upload Image
 
 **POST** `/upload`
+
+**Headers:**
+- `X-API-Key`: Your API key (required)
 
 **Request:**
 - Content-Type: `multipart/form-data`
@@ -88,7 +121,7 @@ go build -o image-upload
 }
 ```
 
-**Error Response (400/500):**
+**Error Response (400/401/500):**
 ```json
 {
   "status": 400,
@@ -99,17 +132,24 @@ go build -o image-upload
 
 ## Testing with cURL
 
+**Health check:**
+```bash
+curl -H "X-API-Key: your-secret-api-key-here" http://localhost:8080/
+```
+
+**Upload image:**
 ```bash
 curl -X POST http://localhost:8080/upload \
+  -H "X-API-Key: your-secret-api-key-here" \
   -F "image=@/path/to/your/image.jpg"
 ```
 
 ## Testing with Postman
 
-1. Create a new POST request to `http://localhost:8080/upload`
-2. Go to Body → form-data
-3. Add key `image`, change type to `File`
-4. Select an image file
+1. Create a new request (GET for `/` or POST for `/upload`)
+2. Set URL: `http://localhost:8080/` or `http://localhost:8080/upload`
+3. Go to Headers → Add `X-API-Key` with your API key value
+4. For upload: Go to Body → form-data → Add key `image` (type: File) → Select image
 5. Send request
 
 ## HTTPS Configuration
@@ -142,40 +182,196 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 
 ## Deployment
 
-### Docker (Optional)
+### Deploy to VPS (Ubuntu/Debian)
+
+1. **Install Go:**
+```bash
+wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+```
+
+2. **Clone and build:**
+```bash
+git clone <your-repo-url>
+cd image-upload-r2
+go build -o image-upload
+```
+
+3. **Configure environment:**
+```bash
+cp .env.example .env
+nano .env  # Edit with your credentials
+```
+
+4. **Run with systemd:**
+
+Create `/etc/systemd/system/image-upload.service`:
+```ini
+[Unit]
+Description=Image Upload Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/image-upload-r2
+EnvironmentFile=/path/to/image-upload-r2/.env
+ExecStart=/path/to/image-upload-r2/image-upload
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable image-upload
+sudo systemctl start image-upload
+sudo systemctl status image-upload
+```
+
+### Deploy with Docker
 
 Create `Dockerfile`:
 ```dockerfile
-FROM golang:1.25-alpine
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN go build -o server
+RUN go build -o image-upload
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/image-upload .
 EXPOSE 8080
-CMD ["./server"]
+CMD ["./image-upload"]
 ```
 
 Build and run:
 ```bash
 docker build -t image-upload-r2 .
-docker run -p 8080:8080 --env-file .env image-upload-r2
+docker run -d -p 8080:8080 --env-file .env --name image-upload image-upload-r2
 ```
 
-### Behind Nginx
+### Deploy with Docker Compose
 
+Create `docker-compose.yml`:
+```yaml
+version: '3.8'
+services:
+  image-upload:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    restart: unless-stopped
+```
+
+Run:
+```bash
+docker-compose up -d
+```
+
+### Behind Nginx Reverse Proxy
+
+Create `/etc/nginx/sites-available/image-upload`:
 ```nginx
 server {
-    listen 443 ssl;
+    listen 80;
     server_name yourdomain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
 
     location / {
         proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 10M;
     }
 }
+```
+
+Enable and reload:
+```bash
+sudo ln -s /etc/nginx/sites-available/image-upload /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### SSL with Certbot (Let's Encrypt)
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d yourdomain.com
+```
+
+### Deploy to Railway
+
+1. Install Railway CLI:
+```bash
+npm i -g @railway/cli
+```
+
+2. Login and deploy:
+```bash
+railway login
+railway init
+railway up
+```
+
+3. Add environment variables in Railway dashboard
+
+### Deploy to Render
+
+1. Create `render.yaml`:
+```yaml
+services:
+  - type: web
+    name: image-upload-r2
+    env: go
+    buildCommand: go build -o image-upload
+    startCommand: ./image-upload
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: API_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY
+        sync: false
+      - key: R2_SECRET_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
+```
+
+2. Push to GitHub and connect to Render
+
+### Deploy to Fly.io
+
+1. Install Fly CLI:
+```bash
+curl -L https://fly.io/install.sh | sh
+```
+
+2. Deploy:
+```bash
+fly launch
+fly secrets set API_KEY=your-key
+fly secrets set R2_ACCOUNT_ID=your-id
+fly secrets set R2_ACCESS_KEY=your-key
+fly secrets set R2_SECRET_KEY=your-secret
+fly secrets set R2_BUCKET_NAME=your-bucket
+fly secrets set R2_PUBLIC_URL=your-url
+fly deploy
 ```
 
 ## Project Structure
@@ -194,6 +390,7 @@ server {
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `PORT` | No | Server port (default: 8080) |
+| `API_KEY` | Yes | API key for authentication |
 | `TLS_CERT_FILE` | No | Path to TLS certificate for HTTPS |
 | `TLS_KEY_FILE` | No | Path to TLS private key for HTTPS |
 | `R2_ACCOUNT_ID` | Yes | Cloudflare account ID |
@@ -205,11 +402,14 @@ server {
 ## Security Considerations
 
 - Never commit `.env` file to version control
-- Use HTTPS in production
+- Use strong, randomly generated API keys (min 32 characters)
+- Always use HTTPS in production
 - Consider rate limiting for public deployments
 - Validate file content (not just extension) for production use
 - Set appropriate CORS headers if needed
 - Use IAM roles instead of static credentials when possible
+- Rotate API keys regularly
+- Store API keys in secrets manager for production
 
 ## Contributing
 
