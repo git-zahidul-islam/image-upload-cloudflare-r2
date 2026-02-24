@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -19,9 +20,10 @@ import (
 )
 
 type ApiResponse struct {
-	Status  int     `json:"status"`
-	URL     *string `json:"url"`
-	Message string  `json:"message"`
+	Status  int      `json:"status"`
+	URLs    []string `json:"urls"`
+	Message string   `json:"message"`
+	Failed  []string `json:"failed,omitempty"`
 }
 
 type HealthResponse struct {
@@ -122,37 +124,66 @@ func initR2() {
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		sendJSON(w, 405, nil, "Method not allowed")
+		sendJSONMulti(w, 405, nil, nil, "Method not allowed")
 		return
 	}
 
-	err := r.ParseMultipartForm(10 << 20) // 10MB max
+	err := r.ParseMultipartForm(50 << 20) // 50MB max for 5 images
 	if err != nil {
-		sendJSON(w, 400, nil, "Invalid multipart form")
+		sendJSONMulti(w, 400, nil, nil, "Invalid multipart form")
 		return
 	}
 
-	file, header, err := r.FormFile("image")
-	if err != nil {
-		sendJSON(w, 400, nil, "Image file is required")
+	files := r.MultipartForm.File["images"]
+	if len(files) == 0 {
+		sendJSONMulti(w, 400, nil, nil, "At least 1 image required")
 		return
 	}
-	defer file.Close()
-
-	if !isAllowedImage(header) {
-		sendJSON(w, 400, nil, "Invalid image type. Only jpeg, png, webp allowed")
-		return
-	}
-
-	filename := generateFileName(header.Filename)
-
-	url, err := uploadToR2(file, filename)
-	if err != nil {
-		sendJSON(w, 500, nil, "Failed to upload image")
+	if len(files) > 5 {
+		sendJSONMulti(w, 400, nil, nil, "Maximum 5 images allowed")
 		return
 	}
 
-	sendJSON(w, 200, &url, "Image uploaded successfully")
+	var urls []string
+	var failed []string
+
+	for _, fileHeader := range files {
+		if !isAllowedImage(fileHeader) {
+			failed = append(failed, fileHeader.Filename+": Invalid type")
+			continue
+		}
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			failed = append(failed, fileHeader.Filename+": Failed to open")
+			continue
+		}
+
+		filename := generateFileName(fileHeader.Filename)
+		url, err := uploadToR2(file, filename)
+		file.Close()
+
+		if err != nil {
+			failed = append(failed, fileHeader.Filename+": Upload failed")
+			continue
+		}
+
+		urls = append(urls, url)
+	}
+
+	if len(urls) == 0 {
+		sendJSONMulti(w, 400, nil, failed, "All uploads failed")
+		return
+	}
+
+	if len(failed) > 0 {
+		msg := fmt.Sprintf("%d of %d images uploaded", len(urls), len(files))
+		sendJSONMulti(w, 207, urls, failed, msg)
+		return
+	}
+
+	msg := fmt.Sprintf("%d image(s) uploaded successfully", len(urls))
+	sendJSONMulti(w, 200, urls, nil, msg)
 }
 
 func isAllowedImage(header *multipart.FileHeader) bool {
@@ -199,13 +230,14 @@ func detectContentType(filename string) string {
 	}
 }
 
-func sendJSON(w http.ResponseWriter, status int, url *string, message string) {
+func sendJSONMulti(w http.ResponseWriter, status int, urls []string, failed []string, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
 	json.NewEncoder(w).Encode(ApiResponse{
 		Status:  status,
-		URL:     url,
+		URLs:    urls,
 		Message: message,
+		Failed:  failed,
 	})
 }
